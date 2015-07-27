@@ -32,6 +32,9 @@
 #include <algorithm>
 #include <vector>
 
+#include <iostream>
+#include <sstream>
+
 #include "eleveldb.h"
 
 #include "leveldb/db.h"
@@ -41,6 +44,13 @@
 #include "leveldb/cache.h"
 #include "leveldb/filter_policy.h"
 #include "leveldb/perf_count.h"
+
+#define COUT(statement) \
+{\
+    std::ostringstream _macroOs; \
+    _macroOs << statement << std::endl; \
+    std::cout << _macroOs.str();\
+}
 
 #ifndef INCL_THREADING_H
     #include "threading.h"
@@ -74,7 +84,9 @@ static ErlNifFunc nif_funcs[] =
     {"async_iterator", 3, eleveldb::async_iterator},
     {"async_iterator", 4, eleveldb::async_iterator},
 
-    {"async_iterator_move", 3, eleveldb::async_iterator_move}
+    {"async_iterator_move", 3, eleveldb::async_iterator_move},
+
+    {"async_iotest", 4, eleveldb::async_iotest}
 };
 
 
@@ -523,6 +535,47 @@ ERL_NIF_TERM write_batch_item(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::WriteB
     return item;
 }
 
+/**.......................................................................
+ * Version of write_batch_item that handles an iolist as a Val argument
+ */
+ERL_NIF_TERM write_batch_item_iolist(ErlNifEnv* env, ERL_NIF_TERM item, leveldb::WriteBatch& batch)
+{
+    int arity;
+    const ERL_NIF_TERM* action;
+    if (enif_get_tuple(env, item, &arity, &action) ||
+        enif_is_atom(env, item))
+    {
+        if (item == eleveldb::ATOM_CLEAR)
+        {
+            batch.Clear();
+            return eleveldb::ATOM_OK;
+        }
+
+        ErlNifBinary key, value;
+
+        if (action[0] == eleveldb::ATOM_PUT && arity == 3 &&
+            enif_inspect_binary(env, action[1], &key) &&
+            enif_inspect_iolist_as_binary(env, action[2], &value))
+        {
+            leveldb::Slice key_slice((const char*)key.data, key.size);
+            leveldb::Slice value_slice((const char*)value.data, value.size);
+            batch.Put(key_slice, value_slice);
+            return eleveldb::ATOM_OK;
+        }
+
+        if (action[0] == eleveldb::ATOM_DELETE && arity == 2 &&
+            enif_inspect_binary(env, action[1], &key))
+        {
+            leveldb::Slice key_slice((const char*)key.data, key.size);
+            batch.Delete(key_slice);
+            return eleveldb::ATOM_OK;
+        }
+    }
+
+    // Failed to match clear/put/delete; return the failing item
+    return item;
+}
+
 
 
 namespace eleveldb {
@@ -618,6 +671,7 @@ async_write(
 
     ReferencePtr<DbObject> db_ptr;
 
+
     db_ptr.assign(DbObject::RetrieveDbObject(env, handle_ref));
 
     if(NULL==db_ptr.get()
@@ -674,6 +728,7 @@ async_get(
     const ERL_NIF_TERM& key_ref    = argv[2];
     const ERL_NIF_TERM& opts_ref   = argv[3];
 
+    
     ReferencePtr<DbObject> db_ptr;
 
     db_ptr.assign(DbObject::RetrieveDbObject(env, dbh_ref));
@@ -1060,7 +1115,67 @@ async_destroy(
 
 }   // async_destroy
 
+ERL_NIF_TERM
+async_iotest(
+    ErlNifEnv* env,
+    int argc,
+    const ERL_NIF_TERM argv[])
+{
+    const ERL_NIF_TERM& caller_ref = argv[0];
+    const ERL_NIF_TERM& handle_ref = argv[1];
+    const ERL_NIF_TERM& action_ref = argv[2];
+    const ERL_NIF_TERM& opts_ref   = argv[3];
+
+    ReferencePtr<DbObject> db_ptr;
+
+
+    db_ptr.assign(DbObject::RetrieveDbObject(env, handle_ref));
+
+    if(NULL==db_ptr.get()
+       || !enif_is_list(env, action_ref)
+       || !enif_is_list(env, opts_ref))
+    {
+        return enif_make_badarg(env);
+    }
+
+    // is this even possible?
+    if(NULL == db_ptr->m_Db)
+        return send_reply(env, caller_ref, error_einval(env));
+
+    eleveldb_priv_data& priv = *static_cast<eleveldb_priv_data *>(enif_priv_data(env));
+
+    // Construct a write batch:
+    leveldb::WriteBatch* batch = new leveldb::WriteBatch;
+
+    // Seed the batch's data:
+
+    ERL_NIF_TERM result = fold(env, argv[2], write_batch_item_iolist, *batch);
+    if(eleveldb::ATOM_OK != result)
+    {
+        return send_reply(env, caller_ref,
+                          enif_make_tuple3(env, eleveldb::ATOM_ERROR, caller_ref,
+                                           enif_make_tuple2(env, eleveldb::ATOM_BAD_WRITE_ACTION,
+                                                            result)));
+    }   // if
+
+    leveldb::WriteOptions* opts = new leveldb::WriteOptions;
+    fold(env, argv[3], parse_write_option, *opts);
+
+    eleveldb::WorkTask* work_item = new eleveldb::WriteTask(env, caller_ref,
+                                                            db_ptr.get(), batch, opts);
+
+    if(false == priv.thread_pool.submit(work_item))
+    {
+        delete work_item;
+        return send_reply(env, caller_ref,
+                          enif_make_tuple2(env, eleveldb::ATOM_ERROR, caller_ref));
+    }   // if
+
+    return eleveldb::ATOM_OK;
+} // async_test_fn
+
 } // namespace eleveldb
+
 
 
 /**

@@ -23,6 +23,7 @@
 
 -export([open/2,
          close/1,
+         init/0,
          get/3,
          put/4,
          async_put/5,
@@ -33,7 +34,9 @@
          status/2,
          destroy/2,
          repair/2,
-         is_empty/1]).
+         is_empty/1,
+         ioput/4,
+         iowrite/3]).
 
 -export([option_types/1,
          validate_options/2]).
@@ -167,6 +170,19 @@ async_put(Ref, Context, Key, Value, Opts) ->
     Updates = [{put, Key, Value}],
     async_write(Context, Ref, Updates, Opts),
     ok.
+
+-spec ioput(db_ref(), binary(), binary(), write_options()) -> ok | {error, any()}.
+ioput(Ref, Key, Value, Opts) -> iowrite(Ref, [{put, Key, Value}], Opts).
+
+-spec iowrite(db_ref(), write_actions(), write_options()) -> ok | {error, any()}.
+iowrite(Ref, Updates, Opts) ->
+    CallerRef = make_ref(),
+    async_iotest(CallerRef, Ref, Updates, Opts),
+    ?WAIT_FOR_REPLY(CallerRef).
+
+-spec async_iotest(reference(), db_ref(), write_actions(), write_options()) -> ok.
+async_iotest(_CallerRef, _Ref, _Updates, _Opts) ->
+    erlang:nif_error({error, not_loaded}).
 
 -spec async_write(reference(), db_ref(), write_actions(), write_options()) -> ok.
 async_write(_CallerRef, _Ref, _Updates, _Opts) ->
