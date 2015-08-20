@@ -76,8 +76,8 @@ static ErlNifFunc nif_funcs[] =
     {"async_iterator_move", 3, eleveldb::async_iterator_move},
 
     {"streaming_start", 4, eleveldb::streaming_start},
-    {"streaming_ack", 2, eleveldb::streaming_ack},
-    {"streaming_stop", 1, eleveldb::streaming_stop}
+    {"streaming_ack",   2, eleveldb::streaming_ack},
+    {"streaming_stop",  1, eleveldb::streaming_stop}
 };
 
 
