@@ -66,6 +66,7 @@ static ErlNifFunc nif_funcs[] =
     {"destroy", 2, eleveldb_destroy},
     {"repair", 2, eleveldb_repair},
     {"is_empty", 1, eleveldb_is_empty},
+    {"compaction", 1, eleveldb_compaction},
 
     {"async_open", 3, eleveldb::async_open},
     {"async_write", 4, eleveldb::async_write},
@@ -1095,6 +1096,31 @@ eleveldb_repair(
         return enif_make_badarg(env);
     }
 }   // eleveldb_repair
+
+ERL_NIF_TERM
+eleveldb_compaction(
+    ErlNifEnv* env,
+    int argc,
+    const ERL_NIF_TERM argv[])
+{
+    eleveldb::ReferencePtr<eleveldb::DbObject> db_ptr;
+
+    db_ptr.assign(eleveldb::DbObject::RetrieveDbObject(env, argv[0]));
+
+    if (NULL!=db_ptr.get())
+    {
+        if (db_ptr->m_Db == NULL)
+        {
+            return error_einval(env);
+        }
+        db_ptr->m_Db->CompactRange(NULL, NULL);
+        return eleveldb::ATOM_OK;
+    }
+    else
+    {
+        return enif_make_badarg(env);
+    }
+}   // eleveldb_compaction
 
 /**
  * HEY YOU ... please make async

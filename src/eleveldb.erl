@@ -33,7 +33,8 @@
          status/2,
          destroy/2,
          repair/2,
-         is_empty/1]).
+         is_empty/1,
+         compaction/1]).
 
 -export([option_types/1,
          validate_options/2]).
@@ -272,6 +273,11 @@ is_empty(Ref) ->
 
 is_empty_int(_Ref) ->
     erlang:nif_error({error, not_loaded}).
+
+-spec compaction(db_ref()) -> ok.
+compaction(Ref) ->
+    eleveldb_bump:big(),
+    compaction(Ref).
 
 -spec option_types(open | read | write) -> [{atom(), bool | integer | any}].
 option_types(open) ->
